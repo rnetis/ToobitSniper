@@ -1,0 +1,43 @@
+name: ToobitSniper
+options:
+  bundleIdPrefix: com.tradingdesk
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_IDENTITY: ""
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  ToobitSniper:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tradingdesk.toobitsniper
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
+        INFOPLIST_KEY_UIUserInterfaceStyle: "Dark"
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: "NO"
+        GENERATE_INFOPLIST_FILE: "YES"
+        ENABLE_BITCODE: "NO"
+        TARGETED_DEVICE_FAMILY: "1"
+
+schemes:
+  ToobitSniper:
+    build:
+      targets:
+        ToobitSniper: all
+    run:
+      config: Debug
+    archive:
+      config: Release
