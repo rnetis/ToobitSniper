@@ -56,6 +56,7 @@ final class AppStore: ObservableObject {
         diagnostics.log("app", "pipeline stop")
         socket.disconnect()
         evalTimer?.invalidate()
+        diagnostics.noteCleanShutdown()
     }
 
     func applyConfig() {
@@ -201,7 +202,10 @@ final class AppStore: ObservableObject {
 
     func evaluate(symbol: String) {
         guard let data = market[symbol] else { return }
+        let started = DispatchTime.now().uptimeNanoseconds
         let produced = engine.evaluate(data)
+        let elapsedMs = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+        diagnostics.noteEvaluation(symbol: symbol, milliseconds: elapsedMs)
         data.lastEvaluatedAt = Date()
         lastRefresh = Date()
         for var signal in produced {

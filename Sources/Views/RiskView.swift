@@ -259,6 +259,12 @@ struct SettingsView: View {
                 diagnosticRow("Socket reconnects", "\(diagnostics.reconnects)")
                 diagnosticRow("WS events processed", "\(diagnostics.eventsProcessed)")
                 diagnosticRow("WS events dropped", "\(diagnostics.eventsDropped)")
+                diagnosticRow("Previous session", diagnostics.previousSessionText)
+                diagnosticRow("Eval time (last / avg / max)", String(format: "%.0f / %.0f / %.0f ms",
+                                                                  diagnostics.lastEvalMs,
+                                                                  diagnostics.averageEvalMs,
+                                                                  diagnostics.maxEvalMs))
+                diagnosticRow("Slow evals (≥120 ms)", "\(diagnostics.slowEvals) of \(diagnostics.evalCount)")
                 Button("copy diagnostics log") {
                     UIPasteboard.general.string = diagnostics.fullLogText
                 }
