@@ -61,7 +61,7 @@ struct RiskView: View {
                 .foregroundColor(.terminalMuted)
             Spacer()
             TextField("10000", text: Binding(
-                get: { String(Int(governor.config.equity)) },
+                get: { governor.config.equity.isFinite ? String(Int(governor.config.equity)) : "" },
                 set: { governor.config.equity = Double($0) ?? governor.config.equity }))
                 .font(TerminalFont.mono(13, weight: .bold))
                 .foregroundColor(.terminalText)

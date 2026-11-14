@@ -6,6 +6,14 @@
 //  Heartbeat: {"ping":<ms>} → {"pong":<ms>} every ≤4 min (disconnect after 5 min without it).
 //  Topics used: kline_1m/5m/15m/1h, trade, depth, bookTicker, markPrice.
 //  NOTE: first kline push carries only the live bar → REST bootstrap is mandatory.
+//
+//  Lifecycle rules (they keep the app alive over long sessions):
+//  • exactly one live URLSessionWebSocketTask — the previous one is cancelled before opening,
+//    otherwise every reconnect leaves a second socket streaming duplicate events;
+//  • reconnect scheduling is idempotent (one pending retry at a time) and backs off until a
+//    connection actually opens, so a flapping network cannot spawn sockets in a loop;
+//  • connection/timer state is only mutated on the main thread — RunLoop timer creation and
+//    invalidation from a URLSession delegate queue is undefined behaviour.
 
 import Foundation
 
@@ -25,67 +33,147 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
     private var pingTimer: Timer?
     private var symbols: [String] = []
     private var reconnectAttempt = 0
+    private var reconnectPending = false
+    private var stopped = true
 
     var onEvent: ((Event) -> Void)?
     var onStatus: ((String) -> Void)?
 
+    deinit {
+        pingTimer?.invalidate()
+        task?.cancel(with: .goingAway, reason: nil)
+    }
+
+    // MARK: - Connection
+
+    /// Main thread only (AppStore calls this from the main actor).
     func connect(symbols: [String]) {
         self.symbols = symbols
+        stopped = false
+        reconnectAttempt = 0
         open()
     }
 
     private func open() {
+        guard !stopped else { return }
+        // Never leave the previous socket running: it would keep streaming duplicate events.
+        task?.cancel(with: .goingAway, reason: nil)
+        task = nil
         guard let url = URL(string: Self.host) else { return }
-        let task = session.webSocketTask(with: url)
-        self.task = task
-        task.resume()
+        let newTask = session.webSocketTask(with: url)
+        task = newTask
+        newTask.resume()
         onStatus?(reconnectAttempt == 0 ? "connecting" : "reconnecting(#\(reconnectAttempt))")
-        subscribeAll(afterDelay: 1.0)
+        subscribeAll(on: newTask, afterDelay: 1.0)
         startPing()
-        receiveLoop(on: task)
+        receiveLoop(on: newTask)
     }
 
-    private func subscribeAll(afterDelay delay: Double) {
-        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self = self else { return }
+    private func subscribeAll(on socketTask: URLSessionWebSocketTask, afterDelay delay: Double) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self, !self.stopped, self.task === socketTask else { return }
             for sym in self.symbols {
                 for tf in ["1m", "5m", "15m", "1h"] {
-                    self.send(["symbol": sym, "topic": "kline_\(tf)", "event": "sub", "params": ["binary": "false"]])
+                    self.send(["symbol": sym, "topic": "kline_\(tf)", "event": "sub", "params": ["binary": "false"]], on: socketTask)
                 }
-                self.send(["symbol": sym, "topic": "trade", "event": "sub", "params": ["binary": "false"]])
-                self.send(["symbol": sym, "topic": "depth", "event": "sub", "params": ["binary": "false"]])
-                self.send(["symbol": sym, "topic": "bookTicker", "event": "sub"])
+                self.send(["symbol": sym, "topic": "trade", "event": "sub", "params": ["binary": "false"]], on: socketTask)
+                self.send(["symbol": sym, "topic": "depth", "event": "sub", "params": ["binary": "false"]], on: socketTask)
+                self.send(["symbol": sym, "topic": "bookTicker", "event": "sub"], on: socketTask)
             }
             self.onStatus?("streaming \(self.symbols.count) symbols")
-            self.reconnectAttempt = 0
         }
     }
 
-    private func send(_ payload: [String: Any]) {
+    private func send(_ payload: [String: Any], on socketTask: URLSessionWebSocketTask) {
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let text = String(data: data, encoding: .utf8) else { return }
-        task?.send(.string(text)) { [weak self] error in
-            if error != nil { self?.scheduleReconnect() }
+        socketTask.send(.string(text)) { [weak self] error in
+            guard error != nil else { return }
+            DispatchQueue.main.async {
+                guard let self = self, self.task === socketTask else { return }
+                self.scheduleReconnect()
+            }
         }
     }
 
-    private func receiveLoop(on task: URLSessionWebSocketTask) {
-        task.receive { [weak self, weak task] result in
-            guard let self = self else { return }
+    private func receiveLoop(on socketTask: URLSessionWebSocketTask) {
+        socketTask.receive { [weak self, weak socketTask] result in
+            guard let self = self, let t = socketTask else { return }
             switch result {
             case .success(let message):
                 if case .string(let text) = message {
                     self.handle(text: text)
                 }
-                if let t = task, self.task === t {
+                DispatchQueue.main.async {
+                    guard !self.stopped, self.task === t else { return }
                     self.receiveLoop(on: t)
                 }
             case .failure:
-                self.onStatus?("disconnected")
-                self.scheduleReconnect()
+                DispatchQueue.main.async {
+                    guard !self.stopped, self.task === t else { return }
+                    self.onStatus?("disconnected")
+                    self.scheduleReconnect()
+                }
             }
         }
     }
+
+    // MARK: - Heartbeat & reconnect
+
+    private func startPing() {
+        pingTimer?.invalidate()
+        let timer = Timer(timeInterval: 240, repeats: true) { [weak self] _ in
+            guard let self = self, let t = self.task else { return }
+            let ms = Int64(Date().timeIntervalSince1970 * 1000)
+            self.send(["ping": ms], on: t)
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pingTimer = timer
+    }
+
+    /// One pending retry at a time; backoff only resets once a socket actually opens.
+    private func scheduleReconnect() {
+        guard !stopped, !reconnectPending else { return }
+        reconnectPending = true
+        reconnectAttempt += 1
+        let delay = min(30.0, pow(2.0, Double(reconnectAttempt)))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self else { return }
+            self.reconnectPending = false
+            self.open()
+        }
+    }
+
+    func disconnect() {
+        stopped = true
+        reconnectPending = false
+        pingTimer?.invalidate()
+        pingTimer = nil
+        task?.cancel(with: .goingAway, reason: nil)
+        task = nil
+    }
+
+    // MARK: URLSessionWebSocketDelegate
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didOpenWithProtocol protocol: String?) {
+        DispatchQueue.main.async {
+            guard self.task === webSocketTask else { return }
+            self.reconnectAttempt = 0
+            self.onStatus?("socket open")
+        }
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        DispatchQueue.main.async {
+            guard !self.stopped, self.task === webSocketTask else { return }
+            self.onStatus?("socket closed")
+            self.scheduleReconnect()
+        }
+    }
+
+    // MARK: - Message parsing (read-only with respect to socket state)
 
     private func handle(text: String) {
         guard let data = text.data(using: .utf8),
@@ -174,45 +262,5 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
         case "1d": return 86_400_000
         default: return 60_000
         }
-    }
-
-    // MARK: - Heartbeat & reconnect
-
-    private func startPing() {
-        pingTimer?.invalidate()
-        let timer = Timer(timeInterval: 240, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            let ms = Int64(Date().timeIntervalSince1970 * 1000)
-            self.send(["ping": ms])
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        pingTimer = timer
-    }
-
-    private func scheduleReconnect() {
-        reconnectAttempt += 1
-        let delay = min(30.0, pow(2.0, Double(reconnectAttempt)))
-        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.open()
-        }
-    }
-
-    func disconnect() {
-        pingTimer?.invalidate()
-        task?.cancel(with: .goingAway, reason: nil)
-        task = nil
-    }
-
-    // MARK: URLSessionWebSocketDelegate
-
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
-                    didOpenWithProtocol protocol: String?) {
-        onStatus?("socket open")
-    }
-
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
-                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        onStatus?("socket closed")
-        scheduleReconnect()
     }
 }
