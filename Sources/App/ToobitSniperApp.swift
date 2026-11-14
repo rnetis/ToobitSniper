@@ -16,6 +16,7 @@ struct ToobitSniperApp: App {
             RootView()
                 .environmentObject(store)
                 .environmentObject(store.governor)
+                .environmentObject(Diagnostics.shared)
                 .preferredColorScheme(.dark)
                 .onAppear {
                     store.requestNotificationPermission()

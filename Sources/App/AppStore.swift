@@ -25,6 +25,7 @@ final class AppStore: ObservableObject {
     @Published var bootstrapped = false
 
     let governor = RiskGovernor()
+    private lazy var diagnostics = Diagnostics.shared
     private var engine: SignalEngine
     private let socket = ToobitSocket()
     private let api = ToobitAPI.shared
@@ -45,12 +46,14 @@ final class AppStore: ObservableObject {
     // MARK: - Lifecycle
 
     func start() {
+        diagnostics.log("app", "pipeline start (\(symbols.count) symbols)")
         Task { await bootstrap() }
         startEvalTimer()
         beginDayIfNeeded()
     }
 
     func stop() {
+        diagnostics.log("app", "pipeline stop")
         socket.disconnect()
         evalTimer?.invalidate()
     }
@@ -132,13 +135,26 @@ final class AppStore: ObservableObject {
 
     func restartSocket() async {
         socket.disconnect()
-        socket.onEvent = { [weak self] event in
-            Task { @MainActor in self?.handleSocketEvent(event) }
+        socket.onEvents = { [weak self] events in
+            // One main-actor hop per coalesced batch, not per websocket event.
+            Task { @MainActor in self?.apply(events) }
+        }
+        socket.onDropped = { [weak self] count in
+            Task { @MainActor in self?.diagnostics.noteDropped(count) }
         }
         socket.onStatus = { [weak self] status in
-            Task { @MainActor in self?.connectionStatus = status }
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.connectionStatus = status
+                self.diagnostics.noteStatus(status)
+            }
         }
         socket.connect(symbols: symbols)
+    }
+
+    private func apply(_ events: [ToobitSocket.Event]) {
+        for event in events { handleSocketEvent(event) }
+        diagnostics.noteBatch(processed: events.count)
     }
 
     private func handleSocketEvent(_ event: ToobitSocket.Event) {

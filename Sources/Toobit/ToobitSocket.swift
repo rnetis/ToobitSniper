@@ -36,8 +36,22 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
     private var reconnectPending = false
     private var stopped = true
 
-    var onEvent: ((Event) -> Void)?
+    /// Delivered on the main queue in batches (see `emit`/`flush`), never one callback per event.
+    var onEvents: (([Event]) -> Void)?
+    /// Called when the batch buffer overflowed and the oldest events had to be discarded.
+    var onDropped: ((Int) -> Void)?
     var onStatus: ((String) -> Void)?
+
+    // MARK: - Event batching
+
+    // Parsing runs on the URLSession queue; flushing happens on the main queue. The buffer is
+    // guarded by a lock and bounded, and only one flush is ever scheduled, so a burst of trades
+    // costs one main-actor hop per flush instead of one Task per event.
+    private let batchLock = NSLock()
+    private var pendingEvents: [Event] = []
+    private var flushScheduled = false
+    private var droppedEvents = 0
+    private let pendingLimit = 512
 
     deinit {
         pingTimer?.invalidate()
@@ -88,9 +102,9 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let text = String(data: data, encoding: .utf8) else { return }
         socketTask.send(.string(text)) { [weak self] error in
-            guard error != nil else { return }
+            guard error != nil, let self = self else { return }
             DispatchQueue.main.async {
-                guard let self = self, self.task === socketTask else { return }
+                guard self.task === socketTask else { return }
                 self.scheduleReconnect()
             }
         }
@@ -147,6 +161,7 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
     func disconnect() {
         stopped = true
         reconnectPending = false
+        discardPending()
         pingTimer?.invalidate()
         pingTimer = nil
         task?.cancel(with: .goingAway, reason: nil)
@@ -175,6 +190,45 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
 
     // MARK: - Message parsing (read-only with respect to socket state)
 
+    private func emit(_ event: Event) {
+        var schedule = false
+        batchLock.lock()
+        if pendingEvents.count >= pendingLimit {
+            pendingEvents.removeFirst(pendingEvents.count - pendingLimit + 1)
+            droppedEvents += 1
+        }
+        pendingEvents.append(event)
+        if !flushScheduled {
+            flushScheduled = true
+            schedule = true
+        }
+        batchLock.unlock()
+        if schedule {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.flush()
+            }
+        }
+    }
+
+    private func flush() {
+        batchLock.lock()
+        let batch = pendingEvents
+        pendingEvents.removeAll(keepingCapacity: true)
+        let dropped = droppedEvents
+        droppedEvents = 0
+        flushScheduled = false
+        batchLock.unlock()
+        if dropped > 0 { onDropped?(dropped) }
+        if !batch.isEmpty { onEvents?(batch) }
+    }
+
+    private func discardPending() {
+        batchLock.lock()
+        pendingEvents.removeAll(keepingCapacity: true)
+        droppedEvents = 0
+        batchLock.unlock()
+    }
+
     private func handle(text: String) {
         guard let data = text.data(using: .utf8),
               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
@@ -199,7 +253,7 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
                 let candle = Candle(openTime: t, open: o, high: h, low: l, close: c, volume: v, takerBuyVolume: v / 2)
                 let now = Int64(Date().timeIntervalSince1970 * 1000)
                 let isClosed = t + intervalMillis(interval) <= now
-                onEvent?(.kline(symbol: sym, interval: interval, candle: candle, isClosed: isClosed))
+                emit(.kline(symbol: sym, interval: interval, candle: candle, isClosed: isClosed))
             }
         case "trade":
             for item in dataItems {
@@ -209,7 +263,7 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
                       let t = (item["t"] as? NSNumber)?.int64Value else { continue }
                 let m = (item["m"] as? NSNumber)?.boolValue ?? (item["m"] as? Bool) ?? false
                 let id = (item["v"] as? String).flatMap(Int64.init) ?? (item["v"] as? NSNumber)?.int64Value ?? t
-                onEvent?(.trade(symbol: sym, tick: TradeTick(id: id, time: t, price: p, qty: q, buyerIsMaker: m)))
+                emit(.trade(symbol: sym, tick: TradeTick(id: id, time: t, price: p, qty: q, buyerIsMaker: m)))
             }
         case "depth":
             for item in dataItems {
@@ -218,7 +272,7 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
                       let bidLevels = parseLevels(bids), let askLevels = parseLevels(asks)
                 else { continue }
                 let t = (item["t"] as? NSNumber)?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
-                onEvent?(.depth(symbol: sym, snapshot: DepthSnapshot(time: t, bids: bidLevels, asks: askLevels)))
+                emit(.depth(symbol: sym, snapshot: DepthSnapshot(time: t, bids: bidLevels, asks: askLevels)))
             }
         case "bookTicker":
             let items = dataItems.isEmpty ? [obj["data"] as? [String: Any] ?? [:]] : dataItems
@@ -230,7 +284,7 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
                       let aq = (item["aq"] as? String).flatMap(Double.init) ?? (item["aq"] as? NSNumber)?.doubleValue
                 else { continue }
                 let t = (item["t"] as? NSNumber)?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
-                onEvent?(.bookTicker(symbol: sym, ticker: BookTicker(time: t, bid: b, bidQty: bq, ask: a, askQty: aq)))
+                emit(.bookTicker(symbol: sym, ticker: BookTicker(time: t, bid: b, bidQty: bq, ask: a, askQty: aq)))
             }
         default:
             break

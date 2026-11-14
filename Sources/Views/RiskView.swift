@@ -5,6 +5,7 @@
 //  10% monthly stop, half size after 3 losses, ≤3 alerts/symbol/day.
 
 import SwiftUI
+import UIKit
 
 struct RiskView: View {
     @EnvironmentObject private var store: AppStore
@@ -177,6 +178,15 @@ struct RiskView: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var store: AppStore
+    @EnvironmentObject private var diagnostics: Diagnostics
+
+    private func diagnosticRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(TerminalFont.mono(12)).foregroundColor(.terminalMuted)
+            Spacer()
+            Text(value).font(TerminalFont.mono(12, weight: .bold)).foregroundColor(.terminalText)
+        }
+    }
 
     var body: some View {
         List {
@@ -241,6 +251,40 @@ struct SettingsView: View {
                         }
                     }
                     .font(TerminalFont.mono(12))
+                }
+            }
+            Section("DIAGNOSTICS — THIS SESSION") {
+                diagnosticRow("Uptime", diagnostics.uptimeText)
+                diagnosticRow("Memory", String(format: "%.1f MB (peak %.1f MB)", diagnostics.memoryMB, diagnostics.peakMemoryMB))
+                diagnosticRow("Socket reconnects", "\(diagnostics.reconnects)")
+                diagnosticRow("WS events processed", "\(diagnostics.eventsProcessed)")
+                diagnosticRow("WS events dropped", "\(diagnostics.eventsDropped)")
+                Button("copy diagnostics log") {
+                    UIPasteboard.general.string = diagnostics.fullLogText
+                }
+                .font(TerminalFont.mono(12))
+                .foregroundColor(.accentCyan)
+                Button("clear diagnostics log", role: .destructive) {
+                    diagnostics.clear()
+                }
+                .font(TerminalFont.mono(12))
+            }
+            Section("RECENT EVENTS \(diagnostics.events.count)") {
+                if diagnostics.events.isEmpty {
+                    Text("no events recorded yet")
+                        .font(TerminalFont.mono(11))
+                        .foregroundColor(.terminalMuted)
+                } else {
+                    ForEach(Array(diagnostics.events.suffix(40).reversed())) { event in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(event.timeText) · \(event.category.uppercased())")
+                                .font(TerminalFont.mono(9))
+                                .foregroundColor(.terminalMuted)
+                            Text(event.message)
+                                .font(TerminalFont.mono(11))
+                                .foregroundColor(.terminalText)
+                        }
+                    }
                 }
             }
             Section("CONNECTION") {
