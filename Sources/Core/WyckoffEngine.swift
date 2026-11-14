@@ -130,7 +130,7 @@ enum WyckoffEngine {
         if c.isBull {
             let bodyMidOK = c.close >= c.low + c.range * 0.5
             let priorHigh = swings.filter { $0.isHigh }.last?.price
-            let beyond = priorHigh.map { c.close > $0 } ?? (c.close > prev.last?.high ?? false)
+            let beyond = priorHigh.map { c.close > $0 } ?? (c.close > (prev.last?.high ?? .infinity))
             guard bodyMidOK, beyond else { return nil }
             return SignalCandidate(
                 def: StrategyRegistry.sosBarDef, direction: .long,
@@ -142,7 +142,7 @@ enum WyckoffEngine {
         } else {
             let bodyMidOK = c.close <= c.high - c.range * 0.5
             let priorLow = swings.filter { !$0.isHigh }.last?.price
-            let beyond = priorLow.map { c.close < $0 } ?? (c.close < prev.last?.low ?? false)
+            let beyond = priorLow.map { c.close < $0 } ?? (c.close < (prev.last?.low ?? -.infinity))
             guard bodyMidOK, beyond else { return nil }
             return SignalCandidate(
                 def: StrategyRegistry.sowBarDef, direction: .short,

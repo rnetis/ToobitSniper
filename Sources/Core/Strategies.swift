@@ -114,7 +114,7 @@ enum Strategies {
         guard price > 0, ctx.atr5m > 0 else { return [] }
         return ctx.ofLevels.filter { $0.kind == .absorption && abs(price - ($0.top + $0.bottom) / 2) < ctx.atr5m * 1.2 }.map { lvl in
             let dist = abs(price - lvl.bottom)
-            SignalCandidate(
+            return SignalCandidate(
                 def: StrategyRegistry.absorptionDef,
                 direction: lvl.direction,
                 entry: price,

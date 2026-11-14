@@ -81,7 +81,7 @@ struct ChartScreen: View {
     }
 
     private func legendStrip(data: SymbolMarketData) -> some View {
-        let harmony = WyckoffEngine.volumeHarmony(data.klines15m)
+        let harmony = WyckoffEngine.volumeHarmony(candles: data.klines15m)
         let (rt, run) = RenkoEngine.trend(bricks: RenkoEngine.build(candles: data.klines1h, config: RenkoConfig(atrRatio: store.engineConfig.renkoATRRatio)).bricks)
         return HStack(spacing: 14) {
             Label("1h EMA50×200: \(Structure.crossRegime(data.klines1h)?.rawValue.uppercased() ?? "—")", systemImage: "arrow.left.arrow.right")

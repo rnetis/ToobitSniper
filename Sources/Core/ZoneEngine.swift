@@ -69,8 +69,7 @@ enum ZoneEngine {
                         endTime: base.last?.openTime ?? 0,
                         touches: countTouches(candles: candles, from: j, kind: p.kind, top: top, bottom: bottom),
                         baseCandles: base.count,
-                        quality: qualityScore(base: base, atrValue: atrValue),
-                        isFresh: false)
+                        quality: qualityScore(base: base, atrValue: atrValue))
                     zones.append(zone)
                 }
             }

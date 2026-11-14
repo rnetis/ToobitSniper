@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     name: Compile app & package IPA (macOS runner)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
 
     steps:
@@ -72,7 +72,7 @@ jobs:
   sign:
     name: Optional signed IPA (requires repo secrets + SIGNING_ENABLED=true)
     needs: build
-    runs-on: macos-14
+    runs-on: macos-15
     if: ${{ vars.SIGNING_ENABLED == 'true' }}
     timeout-minutes: 30
 

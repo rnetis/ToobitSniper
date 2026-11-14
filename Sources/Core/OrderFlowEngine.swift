@@ -20,7 +20,7 @@ enum OrderFlowEngine {
 
     static func footprint(ticks: [TradeTick], tickSize: Double, window: Int64 = 300_000) -> [FootprintCell] {
         guard tickSize > 0 else { return [] }
-        let cutoff = (Date().timeIntervalSince1970 * 1000) - window
+        let cutoff = Int64(Date().timeIntervalSince1970 * 1000) - window
         var cells: [Int64: FootprintCell] = [:]
         for t in ticks where t.time >= cutoff {
             let level = (t.price / tickSize).rounded() * tickSize
@@ -120,7 +120,7 @@ enum OrderFlowEngine {
     /// with the taker split of the candle: if the extreme tick traded on both sides → unfinished.
     static func unfinishedBusiness(ticks: [TradeTick], tickSize: Double, window: Int64 = 300_000) -> [OFLevel] {
         guard tickSize > 0, !ticks.isEmpty else { return [] }
-        let cutoff = (Date().timeIntervalSince1970 * 1000) - window
+        let cutoff = Int64(Date().timeIntervalSince1970 * 1000) - window
         let recent = ticks.filter { $0.time >= cutoff }
         let byMinute = Dictionary(grouping: recent) { ($0.time / 60_000) * 60_000 }
         var out: [OFLevel] = []

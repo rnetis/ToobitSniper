@@ -210,6 +210,7 @@ enum RenkoDirection: String, Codable {
 
 struct RenkoBrick: Identifiable, Equatable {
     let index: Int
+    var id: Int { index }
     let direction: RenkoDirection
     let open: Double
     let close: Double
@@ -263,7 +264,7 @@ struct Signal: Identifiable {
     let timeframe: String
     let createdAt: Date
     let note: String
-    let allowedByRisk: Bool
+    var allowedByRisk: Bool
     var riskNote: String?
 
     var stopDistance: Double { abs(entry - stop) }

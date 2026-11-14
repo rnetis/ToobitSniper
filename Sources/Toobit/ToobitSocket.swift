@@ -138,8 +138,8 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
                 guard let sym = item["s"] as? String,
                       let b = (item["b"] as? String).flatMap(Double.init) ?? (item["b"] as? NSNumber)?.doubleValue,
                       let a = (item["a"] as? String).flatMap(Double.init) ?? (item["a"] as? NSNumber)?.doubleValue,
-                      let bq = (item["bq"] as? String).flatMap(Double.init) ?? (item["bq"] as? NSNumber)?.doubleValue ?? 0,
-                      let aq = (item["aq"] as? String).flatMap(Double.init) ?? (item["aq"] as? NSNumber)?.doubleValue ?? 0
+                      let bq = (item["bq"] as? String).flatMap(Double.init) ?? (item["bq"] as? NSNumber)?.doubleValue,
+                      let aq = (item["aq"] as? String).flatMap(Double.init) ?? (item["aq"] as? NSNumber)?.doubleValue
                 else { continue }
                 let t = (item["t"] as? NSNumber)?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
                 onEvent?(.bookTicker(symbol: sym, ticker: BookTicker(time: t, bid: b, bidQty: bq, ask: a, askQty: aq)))

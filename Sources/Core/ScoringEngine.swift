@@ -175,10 +175,10 @@ final class SignalEngine {
 
         let swings15m = Structure.swings(data.klines15m, k: 2)
         let swings5m = Structure.swings(data.klines5m, k: 2)
-        let range = WyckoffEngine.detectRange(data.klines15m, swings: swings15m, atrValue: atr15m)
+        let range = WyckoffEngine.detectRange(candles: data.klines15m, swings: swings15m, atrValue: atr15m)
         let sdZones = ZoneEngine.detect(candles: data.klines15m, atrValue: atr15m)
         let fibZones = FibEngine.zones(candles: data.klines15m, swings: swings15m, atrValue: atr15m)
-        let profile = VolumeProfileEngine.profile(data.klines1m)
+        let profile = VolumeProfileEngine.profile(candles: data.klines1m)
         let vpNodes = profile.map { VolumeProfileEngine.heavyNodes(profile: $0) } ?? []
         let footprint = OrderFlowEngine.footprint(ticks: data.ticks, tickSize: data.ticker.tickSize)
         let imbalances = OrderFlowEngine.imbalances(cells: footprint, tickSize: data.ticker.tickSize)
@@ -187,7 +187,7 @@ final class SignalEngine {
         var ofLevels = imbalances + absorptions + bigLimits
         let unfinished = OrderFlowEngine.unfinishedBusiness(ticks: data.ticks, tickSize: data.ticker.tickSize)
         ofLevels.append(contentsOf: unfinished.filter { $0.strength > 0 })
-        let div = OrderFlowEngine.deltaDivergence(data.klines1m)
+        let div = OrderFlowEngine.deltaDivergence(candles: data.klines1m)
         let (bricks, renkoSize) = RenkoEngine.build(candles: data.klines1h, config: RenkoConfig(atrRatio: config.renkoATRRatio))
         let (renkoTrend, renkoRun) = RenkoEngine.trend(bricks: bricks)
 
@@ -210,11 +210,11 @@ final class SignalEngine {
         // Run all enabled evaluators.
         var candidates: [SignalCandidate] = []
         let enabled = { (def: StrategyDef) -> Bool in !self.config.disabledStrategies.contains(def.id) }
-        if enabled(StrategyRegistry.springDef), let r = range, let c = WyckoffEngine.spring(data.klines15m, range: r, atrValue: atr15m) { candidates.append(c) }
-        if enabled(StrategyRegistry.utadDef), let r = range, let c = WyckoffEngine.utad(data.klines15m, range: r, atrValue: atr15m) { candidates.append(c) }
-        if enabled(StrategyRegistry.sosBarDef), let c = WyckoffEngine.significantBar(data.klines15m, atrValue: atr15m), c.direction == .long { candidates.append(c) }
-        if enabled(StrategyRegistry.sowBarDef), let c = WyckoffEngine.significantBar(data.klines15m, atrValue: atr15m), c.direction == .short { candidates.append(c) }
-        if enabled(StrategyRegistry.testNoSupplyDef) || enabled(StrategyRegistry.testNoDemandDef), let c = WyckoffEngine.test(data.klines15m, atrValue: atr15m) { candidates.append(c) }
+        if enabled(StrategyRegistry.springDef), let r = range, let c = WyckoffEngine.spring(candles: data.klines15m, range: r, atrValue: atr15m) { candidates.append(c) }
+        if enabled(StrategyRegistry.utadDef), let r = range, let c = WyckoffEngine.utad(candles: data.klines15m, range: r, atrValue: atr15m) { candidates.append(c) }
+        if enabled(StrategyRegistry.sosBarDef), let c = WyckoffEngine.significantBar(candles: data.klines15m, atrValue: atr15m), c.direction == .long { candidates.append(c) }
+        if enabled(StrategyRegistry.sowBarDef), let c = WyckoffEngine.significantBar(candles: data.klines15m, atrValue: atr15m), c.direction == .short { candidates.append(c) }
+        if enabled(StrategyRegistry.testNoSupplyDef) || enabled(StrategyRegistry.testNoDemandDef), let c = WyckoffEngine.test(candles: data.klines15m, atrValue: atr15m) { candidates.append(c) }
         candidates.append(contentsOf: Strategies.lebinZones(ctx))
         candidates.append(contentsOf: Strategies.stackedImbalance(ctx))
         candidates.append(contentsOf: Strategies.absorption(ctx))
@@ -238,7 +238,7 @@ final class SignalEngine {
         features.mtfMomentum = ctx.mtfMomentum?.state ?? .neutral
         features.renkoTrend = renkoTrend
         features.renkoRun = renkoRun
-        let harmony = WyckoffEngine.volumeHarmony(data.klines15m)
+        let harmony = WyckoffEngine.volumeHarmony(candles: data.klines15m)
         features.volumeHarmony = harmony.harmony
         features.harmonyDetail = harmony.detail
         features.fibZones = fibZones

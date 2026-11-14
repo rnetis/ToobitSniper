@@ -6,6 +6,7 @@
 //  qty = (equity × risk%) / (entry − stop) [Shantharaj formula].
 
 import Foundation
+import Combine
 
 struct RiskConfig: Codable {
     var equity: Double = 10_000          // user-editable USDT equity

@@ -6,6 +6,7 @@
 //  → local notification (alerts only; no orders — user-selected).
 
 import Foundation
+import Combine
 import UserNotifications
 
 @MainActor
@@ -23,7 +24,7 @@ final class AppStore: ObservableObject {
     @Published var availableSymbols: [String] = []
     @Published var bootstrapped = false
 
-    private let governor = RiskGovernor()
+    let governor = RiskGovernor()
     private var engine: SignalEngine
     private let socket = ToobitSocket()
     private let api = ToobitAPI.shared

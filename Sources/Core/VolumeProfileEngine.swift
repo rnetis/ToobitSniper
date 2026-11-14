@@ -43,7 +43,7 @@ enum VolumeProfileEngine {
         }
 
         let bins = volumes.enumerated().map { (idx, v) in
-            Bin(bottom: lows + Double(idx) * binSize, top: lows + Double(idx + 1) * binSize, volume: v)
+            VolumeProfileEngine.Bin(bottom: lows + Double(idx) * binSize, top: lows + Double(idx + 1) * binSize, volume: v)
         }
         let total = volumes.reduce(0, +)
         let mean = total / Double(binCount)
@@ -57,7 +57,7 @@ enum VolumeProfileEngine {
         guard profile.meanVolume > 0 else { return [] }
         let hvnBins = profile.bins.filter { $0.volume >= profile.meanVolume * 1.5 }
         var nodes: [VPNode] = []
-        var group: [Profile.Bin] = []
+        var group: [VolumeProfileEngine.Bin] = []
         func flush() {
             guard !group.isEmpty else { return }
             let vol = group.map { $0.volume }.reduce(0, +)
