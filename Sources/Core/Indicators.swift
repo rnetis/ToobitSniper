@@ -173,8 +173,10 @@ enum Structure {
     static func trendDirection(_ candles: [Candle]) -> TradeDirection? {
         let s = swings(candles, k: 3)
         guard s.count >= 4 else { return nil }
-        let highs = s.filter { $0.isHigh }.suffix(2)
-        let lows = s.filter { !$0.isHigh }.suffix(2)
+        // Array(...) so the slices are zero-based: subscripting a slice with 0/1 traps
+        // once its startIndex is non-zero.
+        let highs = Array(s.filter { $0.isHigh }.suffix(2))
+        let lows = Array(s.filter { !$0.isHigh }.suffix(2))
         guard highs.count == 2, lows.count == 2 else { return nil }
         let higherHighs = highs[1].price > highs[0].price
         let higherLows = lows[1].price > lows[0].price
