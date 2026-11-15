@@ -29,6 +29,9 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Engine smoke test (synthetic datasets)
+        run: ./scripts/run-engine-smoke.sh
+
       - name: Build archive (unsigned)
         run: |
           set -o pipefail

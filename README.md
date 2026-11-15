@@ -71,6 +71,10 @@ The repo ships with **XcodeGen** (`project.yml`) and a GitHub Actions workflow
      `BUILD_CERTIFICATE_BASE64`, `P12_PASSWORD`, `PROVISIONING_PROFILE_BASE64`,
      `PROVISIONING_PROFILE_SPECIFIER`, `DEVELOPMENT_TEAM` to get a signed ad-hoc IPA.
 4. Local build: `brew install xcodegen && xcodegen generate && open ToobitSniper.xcodeproj`.
+5. Before a release, run `./scripts/run-engine-smoke.sh` — it compiles `Sources/Core` with
+   `scripts/engine-smoke/main.swift` and pushes seeded synthetic datasets through
+   `SignalEngine.evaluate`, so a trap in the signal engine fails the run instead of the app.
+   The workflow runs it before archiving.
 
 ## Data plane (live-verified)
 
