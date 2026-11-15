@@ -194,8 +194,9 @@ final class ToobitSocket: NSObject, URLSessionWebSocketDelegate {
         var schedule = false
         batchLock.lock()
         if pendingEvents.count >= pendingLimit {
-            pendingEvents.removeFirst(pendingEvents.count - pendingLimit + 1)
-            droppedEvents += 1
+            let overflow = pendingEvents.count - pendingLimit + 1
+            pendingEvents.removeFirst(overflow)
+            droppedEvents += overflow
         }
         pendingEvents.append(event)
         if !flushScheduled {

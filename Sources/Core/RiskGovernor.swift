@@ -25,13 +25,20 @@ struct RiskVerdict {
 }
 
 final class RiskGovernor: ObservableObject {
-    @Published var config: RiskConfig
+    @Published var config: RiskConfig {
+        didSet {
+            // Editing equity before any P&L is booked re-bases today's starting equity;
+            // otherwise the daily-loss percentage would keep using the stale value.
+            if realizedToday == 0 { dailyStartEquity = config.equity }
+        }
+    }
     @Published var dailyStartEquity: Double
     @Published var realizedToday: Double = 0
     @Published var openRiskPct: Double = 0
     @Published var losingStreak: Int = 0
     @Published var monthlyRealized: Double = 0
     @Published var tradesTodayBySymbol: [String: Int] = [:]
+    private var monthStamp: String = ""
 
     init(config: RiskConfig = RiskConfig()) {
         self.config = config
@@ -41,7 +48,8 @@ final class RiskGovernor: ObservableObject {
     // MARK: - Rails
 
     var dailyLossPct: Double {
-        let loss = dailyStartEquity - realizedToday
+        // realizedToday is a P&L delta (not an equity level): a loss is its negation.
+        let loss = -realizedToday
         return dailyStartEquity > 0 ? max(0, loss / dailyStartEquity * 100) : 0
     }
 
@@ -102,6 +110,15 @@ final class RiskGovernor: ObservableObject {
     }
 
     func newDay() {
+        // Roll the monthly ledger over once per calendar month (it was never reset before,
+        // so a monthly stop would have been permanent).
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM"
+        let month = fmt.string(from: Date())
+        if month != monthStamp {
+            if !monthStamp.isEmpty { monthlyRealized = 0 }
+            monthStamp = month
+        }
         dailyStartEquity = config.equity
         realizedToday = 0
         tradesTodayBySymbol = [:]

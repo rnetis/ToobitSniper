@@ -62,7 +62,7 @@ The repo ships with **XcodeGen** (`project.yml`) and a GitHub Actions workflow
 (`.github/workflows/build-ipa.yml`):
 
 1. Push this repo to GitHub (branch `main`).
-2. The workflow runs on `macos-14`, generates the Xcode project with XcodeGen, archives with
+2. The workflow runs on `macos-15`, generates the Xcode project with XcodeGen, archives with
    `CODE_SIGNING_ALLOWED=NO`, and packages **`ToobitSniper-unsigned.ipa`** as a workflow artifact.
 3. Install the unsigned IPA via any of:
    - **TrollStore** (accepts unsigned IPAs directly, iOS 14–16.6.1 / 17.0),

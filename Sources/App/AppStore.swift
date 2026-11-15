@@ -32,6 +32,8 @@ final class AppStore: ObservableObject {
     private var cooldowns: [String: Date] = [:]
     private var evalTimer: Timer?
     private var dayStamp: String = ""
+    private var contractInfo: [String: ContractInfo] = [:]
+    private var started = false
 
     init() {
         self.engine = SignalEngine(config: EngineConfig())
@@ -46,6 +48,9 @@ final class AppStore: ObservableObject {
     // MARK: - Lifecycle
 
     func start() {
+        // onAppear can fire more than once (scene re-creation); never bootstrap twice.
+        guard !started else { return }
+        started = true
         diagnostics.log("app", "pipeline start (\(symbols.count) symbols)")
         Task { await bootstrap() }
         startEvalTimer()
@@ -56,12 +61,14 @@ final class AppStore: ObservableObject {
         diagnostics.log("app", "pipeline stop")
         socket.disconnect()
         evalTimer?.invalidate()
+        started = false
         diagnostics.noteCleanShutdown()
     }
 
+    /// Engine settings (mode, strategy toggles, Renko ratio) only affect the evaluator —
+    /// the socket subscriptions do not change, so don't tear the connection down for them.
     func applyConfig() {
         rebuildEngine()
-        Task { await restartSocket() }
     }
 
     func beginDayIfNeeded() {
@@ -81,13 +88,9 @@ final class AppStore: ObservableObject {
             let contracts = try await api.exchangeInfo()
             let trading = contracts.filter { $0.status == "TRADING" }
             availableSymbols = trading.map { $0.symbol }.sorted()
-            for sym in symbols {
-                let info = trading.first { $0.symbol == sym }
-                if let info = info {
-                    market[sym]?.ticker.tickSize = info.tickSize
-                    market[sym]?.ticker.stepSize = info.stepSize
-                }
-            }
+            // market[sym] does not exist yet on the first bootstrap, so the sizes are kept here
+            // and applied in loadSymbol (also used by addSymbol).
+            contractInfo = Dictionary(trading.map { ($0.symbol, $0) }, uniquingKeysWith: { first, _ in first })
         } catch {
             connectionStatus = "exchangeInfo failed: \(error.localizedDescription)"
         }
@@ -122,7 +125,11 @@ final class AppStore: ObservableObject {
             ticker.changePct = t.changePct
             ticker.fundingRate = f
             ticker.openInterest = o
-            if ticker.tickSize == 0 { ticker.tickSize = 0.01 }
+            if let info = contractInfo[sym] {
+                ticker.tickSize = info.tickSize
+                ticker.stepSize = info.stepSize
+            }
+            if ticker.tickSize <= 0 { ticker.tickSize = 0.01 }
             data.ticker = ticker
             data.depth = b
             data.ticks = tr
@@ -154,35 +161,43 @@ final class AppStore: ObservableObject {
     }
 
     private func apply(_ events: [ToobitSocket.Event]) {
-        for event in events { handleSocketEvent(event) }
+        var toEvaluate: [String] = []
+        for event in events {
+            if let symbol = handleSocketEvent(event), !toEvaluate.contains(symbol) {
+                toEvaluate.append(symbol)
+            }
+        }
+        // SymbolMarketData is a class: publish once per batch instead of once per event.
+        objectWillChange.send()
+        // At most one evaluation per symbol per batch, even if several timeframes rolled.
+        for symbol in toEvaluate { evaluate(symbol: symbol) }
         diagnostics.noteBatch(processed: events.count)
     }
 
-    private func handleSocketEvent(_ event: ToobitSocket.Event) {
+    /// Applies one event; returns the symbol if a candle just closed and the engine should run.
+    private func handleSocketEvent(_ event: ToobitSocket.Event) -> String? {
         switch event {
         case .kline(let symbol, let interval, let candle, let isClosed):
-            guard var data = market[symbol] else { return }
+            guard let data = market[symbol], ["1m", "5m", "15m", "1h"].contains(interval) else { return nil }
+            let previousOpen = data.candles(for: interval).last?.openTime
             data.append(candle: candle, interval: interval)
-            market[symbol] = data
-            if isClosed {
+            // The stream only ever pushes the live bar, so `isClosed` (computed from the clock)
+            // is never true for it. A bar is closed once the next one opens.
+            let rolled = previousOpen.map { candle.openTime > $0 } ?? false
+            if isClosed || rolled {
                 data.ticker.lastPrice = candle.close
-                market[symbol] = data
-                evaluate(symbol: symbol)
+                return symbol
             }
         case .trade(let symbol, let tick):
-            guard var data = market[symbol] else { return }
-            data.push(tick: tick)
-            market[symbol] = data
+            market[symbol]?.push(tick: tick)
         case .depth(let symbol, let snapshot):
-            guard var data = market[symbol] else { return }
-            data.depth = snapshot
-            market[symbol] = data
+            market[symbol]?.depth = snapshot
         case .bookTicker(let symbol, let ticker):
-            guard var data = market[symbol] else { return }
+            guard let data = market[symbol] else { return nil }
             data.bookTicker = ticker
             data.ticker.lastPrice = (ticker.ask + ticker.bid) / 2
-            market[symbol] = data
         }
+        return nil
     }
 
     // MARK: - Evaluation loop
